@@ -292,9 +292,10 @@ st.markdown("""
     <br><br><br>
     <div style='text-align: center; font-size: 0.9em; color: #888;'>
         Powered by Streamlit & Scikit-learn. <br>
-        Developed as an NLP project.
+        Developed by EmeditWeb as an NLP project.
     </div>
-    """, unsafe_allow_html=True)￼Enter# Input Form
+    """, unsafe_allow_html=True) 
+# Input Form
 with st.container(border=True): # Use a container with a border for a cleaner look
     st.subheader("📝 Article Input")
     title_input = st.text_input("Article Title (optional)",
