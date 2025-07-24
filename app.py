@@ -3,35 +3,86 @@
 import streamlit as st
 import joblib
 import re
-from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
 import nltk
 import os
-import pandas as pd # Although not directly used, useful for data context
+import pandas as pd
+import time # <--- NEW IMPORT: Needed for time.sleep() for retries
 
-# --- Streamlit Page Configuration (for sleek design and wider layout) ---
+# --- Streamlit Page Configuration ---
 st.set_page_config(
     page_title="Fake News Detector | EmeditWeb",
-    page_icon="📰", # A newspaper emoji as the favicon
-    layout="wide", 
-    initial_sidebar_state="collapsed" # Optionally hide sidebar by default
+    page_icon="📰",
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-# --- Download NLTK data (only if not already downloaded by Streamlit Cloud) ---
-# @st.cache_resource caches the result of this function, so NLTK data is downloaded
-# only once across all user sessions and app reruns.
+# --- Robust NLTK Data Setup (relying on Streamlit Cloud's download) ---
 @st.cache_resource
-def download_nltk_data():
-    try:
-        nltk.data.find('corpora/stopwords')
-    except nltk.downloader.DownloadError:
-        nltk.download('stopwords')
-    try:
-        nltk.data.find('corpora/wordnet')
-    except nltk.downloader.DownloadError:
-        nltk.download('wordnet')
+def setup_nltk_data():
+    # Define the standard NLTK download path within Streamlit Cloud's ephemeral storage
+    nltk_default_path = '/home/appuser/nltk_data'
 
-download_nltk_data()
+    # Ensure this path exists and is added to NLTK's search path.
+    # NLTK usually handles this, but explicitly setting it can prevent issues.
+    if not os.path.exists(nltk_default_path):
+        os.makedirs(nltk_default_path) # Create if it doesn't exist
+    
+    if nltk_default_path not in nltk.data.path:
+        nltk.data.path.insert(0, nltk_default_path) # Prepend so it's searched first
+
+    st.info(f"NLTK data path configured to: `{nltk_default_path}`. Attempting to ensure data is present...")
+
+    resources_to_ensure = ['stopwords', 'wordnet']
+    
+    try:
+        for resource in resources_to_ensure:
+            found = False
+            # Try to find the resource first, if not found, try to download with retries
+            for attempt in range(3): # Attempt up to 3 times for robustness
+                try:
+                    nltk.data.find(f'corpora/{resource}')
+                    st.success(f"'{resource}' found successfully.")
+                    found = True
+                    break # Resource found, move to next
+                except LookupError:
+                    st.warning(f"Resource '{resource}' not found locally. Attempting download (Attempt {attempt + 1}/3)...")
+                    try:
+                        # Force download to override "up-to-date" if the previous download was faulty
+                        # download_dir ensures it goes to our explicitly set path
+                        nltk.download(resource, download_dir=nltk_default_path, force=True)
+                        st.success(f"Successfully downloaded '{resource}' on attempt {attempt + 1}.")
+                        # After successful download, try to find it immediately again to confirm
+                        nltk.data.find(f'corpora/{resource}') 
+                        found = True
+                        break # Found after download, move to next resource
+                    except Exception as download_e:
+                        st.error(f"Error downloading '{resource}' on attempt {attempt + 1}: {download_e}")
+                        time.sleep(2) # Wait a bit before retrying
+
+            if not found:
+                # If after all attempts, the resource is still not found, raise a critical error
+                raise LookupError(f"Failed to find or download '{resource}' after multiple attempts. "
+                                  "This indicates a persistent issue with NLTK data acquisition in the environment.")
+        
+        st.success("All NLTK data (stopwords, wordnet) ready for use! ✅")
+
+    except LookupError as e:
+        st.error(f"**CRITICAL ERROR:** NLTK data setup failed. {e}. "
+                 f"Despite multiple download attempts, resources could not be found. "
+                 f"This indicates a persistent issue with NLTK's ability to store/access data in the Streamlit Cloud environment. "
+                 f"You may need to report this to Streamlit support or consider manually including the NLTK data in your repository as a last resort.")
+        st.stop() # Stop the app execution if critical data is not available.
+    except Exception as e:
+        st.error(f"An unexpected error occurred during NLTK setup: {e}")
+        st.stop()
+
+# Call the NLTK setup function very early in the script
+setup_nltk_data()
+
+# Now it should be safe to import stopwords and WordNetLemmatizer, as setup_nltk_data() 
+# ensures the data is available and path is set before these are initialized.
+# from nltk.corpus import stopwords # These lines are already at the top, good.
+# from nltk.stem import WordNetLemmatizer # This is also good.
 
 # --- Load the trained model and TF-IDF Vectorizer ---
 # @st.cache_resource ensures the model and vectorizer are loaded only once
@@ -49,12 +100,13 @@ def load_resources():
         st.error(f"**Error:** Model or Vectorizer file not found. "
                  f"Please ensure '{MODEL_PATH}' and '{VECTORIZER_PATH}' are in the same directory as the app. 💾")
         st.stop() # Stop the app if crucial resources are missing
-        return None, None # Should not be reached due to st.stop()
+        # return None, None # Should not be reached due to st.stop()
 
 model, tfidf_vectorizer = load_resources()
 
 # --- Preprocessing functions (IDENTICAL to training) ---
 # These functions must exactly mirror the preprocessing applied during model training.
+# Initialize NLTK components *after* data is ensured to be present
 lemmatizer = WordNetLemmatizer()
 stop_words = set(stopwords.words('english'))
 
